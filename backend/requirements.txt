@@ -3,3 +3,5 @@ uvicorn>=0.28.0
 pydantic>=2.6.0
 pymupdf>=1.23.0
 python-multipart>=0.0.9
+Pillow>=10.0.0
+pytesseract>=0.3.10
