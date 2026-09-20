@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { DischargeSummaryData, DocumentItem, RecoveryCheckitem, FollowUpAppointment } from '../types';
 import { initialDischargeData, initialChecklist, initialDocuments } from '../data/initialData';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 interface DischargeContextType {
   dischargeData: DischargeSummaryData;
   documents: DocumentItem[];
@@ -9,6 +11,7 @@ interface DischargeContextType {
   activeReviewData: DischargeSummaryData | null;
   isProcessing: boolean;
   processingProgress: number;
+  processingStage: string;
   toggleChecklist: (id: string) => void;
   processDocumentFile: (file: File) => Promise<DischargeSummaryData>;
   processSampleDocument: () => Promise<DischargeSummaryData>;
@@ -40,6 +43,7 @@ export const DischargeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeReviewData, setActiveReviewData] = useState<DischargeSummaryData | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processingProgress, setProcessingProgress] = useState<number>(0);
+  const [processingStage, setProcessingStage] = useState<string>('');
 
   useEffect(() => {
     localStorage.setItem('dischargeguard_plan', JSON.stringify(dischargeData));
@@ -96,42 +100,44 @@ export const DischargeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const processDocumentFile = async (file: File): Promise<DischargeSummaryData> => {
     setIsProcessing(true);
-    setProcessingProgress(15);
+    setProcessingProgress(20);
+    setProcessingStage('Uploading document to secure server...');
 
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      setProcessingProgress(45);
+      setProcessingProgress(40);
+      setProcessingStage('Extracting text & running OCR analysis...');
 
-      let resultData: DischargeSummaryData;
-      try {
-        const response = await fetch('/api/upload-summary', {
-          method: 'POST',
-          body: formData,
-        });
+      const endpoint = `${API_BASE_URL}/api/upload-summary`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+      });
 
-        if (response.ok) {
-          resultData = await response.json();
-        } else {
-          throw new Error('Backend server unavailable, using client processing fallback');
+      setProcessingProgress(75);
+      setProcessingStage('Parsing clinical data & checking missing fields...');
+
+      if (!response.ok) {
+        let errorDetail = `Backend HTTP Error ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson && errJson.detail) {
+            errorDetail = errJson.detail;
+          }
+        } catch (_) {
+          // Keep response status text if JSON parse fails
+          errorDetail = response.statusText || errorDetail;
         }
-      } catch (err) {
-        console.warn('Backend API request skipped/failed, using fallback parser:', err);
-        // Fallback demo processing
-        await new Promise(res => setTimeout(res, 1200));
-        resultData = {
-          ...initialDischargeData,
-          doc_id: `DOC-${Math.floor(100000 + Math.random() * 900000)}`,
-          filename: file.name,
-          upload_timestamp: new Date().toLocaleString()
-        };
+        throw new Error(errorDetail);
       }
 
-      setProcessingProgress(85);
-      await new Promise(res => setTimeout(res, 600));
+      const resultData: DischargeSummaryData = await response.json();
+      resultData.is_demo = false;
 
       setProcessingProgress(100);
+      setProcessingStage('Document processing completed!');
       setIsProcessing(false);
 
       // Add to documents library
@@ -140,16 +146,20 @@ export const DischargeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         name: file.name,
         uploadDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
         fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-        status: 'Needs Review',
+        status: resultData.flagged_issues.length > 0 ? 'Needs Review' : 'Processed',
         summaryData: resultData
       };
 
       setDocuments(prev => [newDoc, ...prev]);
       setActiveReviewData(resultData);
+      setDischargeData(resultData);
       return resultData;
-    } catch (error) {
+
+    } catch (error: any) {
       setIsProcessing(false);
       setProcessingProgress(0);
+      setProcessingStage('');
+      console.error('Failed to process uploaded document:', error);
       throw error;
     }
   };
@@ -157,14 +167,31 @@ export const DischargeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const processSampleDocument = async (): Promise<DischargeSummaryData> => {
     setIsProcessing(true);
     setProcessingProgress(25);
+    setProcessingStage('Fetching sample summary data...');
 
-    await new Promise(res => setTimeout(res, 600));
-    setProcessingProgress(65);
+    try {
+      const endpoint = `${API_BASE_URL}/api/sample-summary`;
+      const response = await fetch(endpoint);
+      if (response.ok) {
+        const sampleData: DischargeSummaryData = await response.json();
+        sampleData.is_demo = true;
+        setProcessingProgress(100);
+        setIsProcessing(false);
+        setActiveReviewData(sampleData);
+        setDischargeData(sampleData);
+        return sampleData;
+      }
+    } catch (_) {
+      console.warn('Backend sample fetch failed, using built-in sample data.');
+    }
+
+    // Fallback sample data with clear is_demo flag
     await new Promise(res => setTimeout(res, 600));
     setProcessingProgress(100);
 
     const sampleDocData: DischargeSummaryData = {
       ...initialDischargeData,
+      is_demo: true,
       doc_id: `DOC-SAMPLE-${Date.now().toString().slice(-4)}`,
       filename: "Sample_Discharge_Summary_Gallbladder.pdf",
       upload_timestamp: new Date().toLocaleString()
@@ -172,8 +199,8 @@ export const DischargeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setIsProcessing(false);
     setActiveReviewData(sampleDocData);
-    
-    // Add to doc library if not present
+    setDischargeData(sampleDocData);
+
     const newDocItem: DocumentItem = {
       id: sampleDocData.doc_id,
       name: sampleDocData.filename,
@@ -195,6 +222,7 @@ export const DischargeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       activeReviewData,
       isProcessing,
       processingProgress,
+      processingStage,
       toggleChecklist,
       processDocumentFile,
       processSampleDocument,

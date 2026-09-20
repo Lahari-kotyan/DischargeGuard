@@ -16,6 +16,7 @@ export interface PatientVisitInfo {
   attending_physician: string;
   hospital_name: string;
   discharge_diagnosis: string;
+  procedure?: string;
   summary_overview: string;
 }
 
@@ -70,6 +71,7 @@ export interface DischargeSummaryData {
   doc_id: string;
   filename: string;
   upload_timestamp: string;
+  is_demo?: boolean;
   patient_visit: PatientVisitInfo;
   medications: MedicationItem[];
   recovery_sections: RecoveryInstructionSection[];

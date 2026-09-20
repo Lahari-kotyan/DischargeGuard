@@ -10,11 +10,13 @@ import {
   Loader2, 
   ArrowRight,
   ShieldCheck,
-  FileType
+  FileType,
+  RotateCcw,
+  ShieldAlert
 } from 'lucide-react';
 
 export const UploadPage: React.FC = () => {
-  const { processDocumentFile, processSampleDocument, isProcessing, processingProgress } = useDischarge();
+  const { processDocumentFile, processSampleDocument, isProcessing, processingProgress, processingStage } = useDischarge();
   const navigate = useNavigate();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -49,9 +51,9 @@ export const UploadPage: React.FC = () => {
 
   const validateAndSetFile = (file: File) => {
     setErrorMsg('');
-    const validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/tiff'];
     if (!validTypes.includes(file.type) && !file.name.endsWith('.pdf')) {
-      setErrorMsg('Unsupported file format. Please upload a PDF or image file (JPEG, PNG).');
+      setErrorMsg('Unsupported file format. Please upload a PDF document or image file (PNG, JPEG, WEBP).');
       return;
     }
     if (file.size > 15 * 1024 * 1024) {
@@ -63,15 +65,17 @@ export const UploadPage: React.FC = () => {
 
   const handleProcessSubmit = async () => {
     if (!selectedFile) return;
+    setErrorMsg('');
     try {
       await processDocumentFile(selectedFile);
       navigate('/review');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to process document.');
+      setErrorMsg(err.message || 'Failed to process document. Please try again or check backend server status.');
     }
   };
 
   const handleProcessSample = async () => {
+    setErrorMsg('');
     try {
       await processSampleDocument();
       navigate('/review');
@@ -82,6 +86,17 @@ export const UploadPage: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Technical Prototype Notice Banner */}
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-900">
+        <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+        <div>
+          <h4 className="font-bold text-amber-950 text-sm">Prototype & Demonstration Notice</h4>
+          <p className="mt-0.5 leading-relaxed">
+            DischargeGuard is a software prototype created strictly for demonstration and testing purposes. It is not clinically validated or HIPAA-certified. Do not use for emergency or sole medical decisions.
+          </p>
+        </div>
+      </div>
+
       {/* Header Banner */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-sky-50 text-sky-800 text-xs font-semibold rounded-full border border-sky-100 mb-1.5">
@@ -90,7 +105,7 @@ export const UploadPage: React.FC = () => {
         </div>
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Upload Discharge Summary</h2>
         <p className="text-slate-600 text-sm mt-1 leading-relaxed">
-          Upload your hospital discharge paper or surgical summary (PDF or scanned image). Our system parses complex clinical text into plain language instructions, medications, and follow-up schedules.
+          Upload your hospital discharge paper or surgical summary (PDF or scanned image). Our backend parses clinical text into plain language instructions, medications, and follow-up schedules.
         </p>
       </div>
 
@@ -130,11 +145,32 @@ export const UploadPage: React.FC = () => {
       {/* Main Drag and Drop Upload Card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
         
-        {/* Error Message Alert */}
+        {/* Error Message Alert with Retry */}
         {errorMsg && (
-          <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs font-medium text-rose-700 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMsg}</span>
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs font-medium text-rose-800 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-sm text-rose-900">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>Document Upload / Processing Error</span>
+            </div>
+            <p className="pl-7 text-rose-700">{errorMsg}</p>
+            {selectedFile && (
+              <div className="pt-2 pl-7 flex items-center gap-3">
+                <button
+                  onClick={handleProcessSubmit}
+                  disabled={isProcessing}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Retry Document Processing</span>
+                </button>
+                <button
+                  onClick={() => { setSelectedFile(null); setErrorMsg(''); }}
+                  className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-lg transition-colors"
+                >
+                  Select Different File
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -157,7 +193,7 @@ export const UploadPage: React.FC = () => {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.tiff"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -203,12 +239,12 @@ export const UploadPage: React.FC = () => {
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2 text-slate-600">
           <h5 className="font-bold text-slate-900 flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-sky-600" />
-            <span>Document Guidelines for Best Extraction</span>
+            <span>Document & Privacy Guidelines</span>
           </h5>
           <ul className="list-disc list-inside space-y-1 pl-1 text-slate-600">
             <li>Upload official hospital discharge paperwork containing doctor's notes, prescriptions, and follow-up plans.</li>
-            <li>Ensure text in photos/scans is clearly legible and unblurred.</li>
-            <li>Document processing operates locally within the demo environment. No real health records leave your browser.</li>
+            <li>Ensure text in scanned images is clear, unblurred, and readable.</li>
+            <li><strong>Data Privacy Statement:</strong> Documents are transmitted securely to our backend server on Render for text extraction & parsing. Document contents are processed transiently in-memory and are not logged or stored permanently on disk.</li>
           </ul>
         </div>
 
@@ -218,7 +254,7 @@ export const UploadPage: React.FC = () => {
             <div className="flex items-center justify-between text-xs font-bold text-sky-900">
               <span className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-sky-600" />
-                <span>Processing Document & Extracting Medical Data...</span>
+                <span>{processingStage || 'Processing Document & Parsing Data...'}</span>
               </span>
               <span>{processingProgress}%</span>
             </div>

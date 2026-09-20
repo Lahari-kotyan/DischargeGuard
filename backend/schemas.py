@@ -9,6 +9,7 @@ class PatientVisitInfo(BaseModel):
     attending_physician: str
     hospital_name: str
     discharge_diagnosis: str
+    procedure: str = "Not specified"
     summary_overview: str
 
 class MedicationItem(BaseModel):
@@ -55,6 +56,7 @@ class DischargeSummaryData(BaseModel):
     doc_id: str
     filename: str
     upload_timestamp: str
+    is_demo: bool = False
     patient_visit: PatientVisitInfo
     medications: List[MedicationItem]
     recovery_sections: List[RecoveryInstructionSection]

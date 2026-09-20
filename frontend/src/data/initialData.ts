@@ -22,6 +22,7 @@ export const initialDischargeData: DischargeSummaryData = {
     attending_physician: "Dr. Sarah Jenkins, MD (Chief of Gastrointestinal Surgery)",
     hospital_name: "St. Jude Metropolitan Hospital",
     discharge_diagnosis: "Acute Cholecystitis - Laparoscopic Cholecystectomy (Gallbladder removal)",
+    procedure: "Laparoscopic Cholecystectomy",
     summary_overview: "Patient presented with acute right upper quadrant pain. Underwent laparoscopic cholecystectomy without complication. Post-operative recovery was normal, vitals stable, and diet tolerated."
   },
   medications: [

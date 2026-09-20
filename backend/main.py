@@ -1,9 +1,8 @@
-
+import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
 from schemas import DischargeSummaryData
-from parser import extract_text_from_pdf_bytes, parse_discharge_text
+from parser import extract_text_from_file_bytes, parse_discharge_text
 
 app = FastAPI(
     title="DischargeGuard API",
@@ -14,16 +13,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS configuration
-# For production, replace "*" with your actual frontend origin.
+# Configure CORS origins
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+allowed_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()] if cors_origins_env else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
+MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
 
 @app.get("/")
 def root():
@@ -33,23 +35,64 @@ def root():
         "docs": "/docs",
     }
 
-
 @app.get("/api/health")
 def health_check():
     return {
         "status": "healthy",
         "service": "DischargeGuard backend",
         "version": "1.0.0",
-        "demo_mode": True,
+        "prototype_notice": "DischargeGuard is a technical prototype for testing and demonstration purposes only."
     }
 
+@app.post("/api/upload-summary", response_model=DischargeSummaryData)
+async def upload_discharge_summary(file: UploadFile = File(...)):
+    """Receives an uploaded PDF/image file, extracts text, and parses structured recovery data."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file was uploaded.")
+
+    filename = file.filename
+    allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
+    extension = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
+
+    if extension and extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported file type. Upload a PDF, PNG, JPG, JPEG, WEBP, TIF, or TIFF."
+        )
+
+    try:
+        content = await file.read()
+
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+        if len(content) > MAX_FILE_SIZE_BYTES:
+            raise HTTPException(status_code=400, detail="Uploaded file exceeds maximum allowed limit of 15 MB.")
+
+        # Extract text from PDF or Image file bytes using PyMuPDF + PyTesseract OCR
+        extracted_text = extract_text_from_file_bytes(content, filename)
+
+        if not extracted_text or not extracted_text.strip():
+            raise HTTPException(status_code=422, detail="No readable text was extracted from the file.")
+
+        # Parse text into structured Pydantic schema
+        parsed_data = parse_discharge_text(extracted_text, filename, is_demo=False)
+        return parsed_data
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await file.close()
 
 @app.get("/api/sample-summary", response_model=DischargeSummaryData)
 def get_sample_discharge_summary():
-    """
-    Return a clearly labeled fictional example.
-    This is demo data, not extracted from an uploaded file.
-    """
+    """Returns a pre-processed demo discharge summary dataset for instant demo testing."""
     sample_text = """
     ST. JUDE METROPOLITAN HOSPITAL - DISCHARGE SUMMARY
     Patient Name: Alex Morgan
@@ -70,112 +113,8 @@ def get_sample_discharge_summary():
     - Surgical Clinic: Sept 30, 2026 @ 10:30 AM with Dr. Jenkins
     - PCP Dr. Robert Chen: Schedule within 3 weeks
     """
-
-    result = parse_discharge_text(
-        sample_text,
-        "fictional_sample_discharge_summary.txt",
-    )
-
-    return result
-
-
-@app.post(
-    "/api/upload-summary",
-    response_model=DischargeSummaryData,
-)
-async def upload_discharge_summary(
-    file: UploadFile = File(...),
-):
-    """
-    Accept a PDF or supported image, extract readable text,
-    and parse the extracted content.
-    """
-
-    if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="A filename is required.",
-        )
-
-    allowed_extensions = {
-        ".pdf",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-        ".tif",
-        ".tiff",
-    }
-
-    filename = file.filename
-    extension = "." + filename.rsplit(".", 1)[-1].lower() \
-        if "." in filename else ""
-
-    if extension not in allowed_extensions:
-        raise HTTPException(
-            status_code=415,
-            detail=(
-                "Unsupported file type. "
-                "Upload a PDF, PNG, JPG, JPEG, WEBP, TIF, or TIFF."
-            ),
-        )
-
-    # Basic upload size limit: 10 MB
-    max_file_size = 10 * 1024 * 1024
-
-    try:
-        file_bytes = await file.read()
-
-        if not file_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail="The uploaded file is empty.",
-            )
-
-        if len(file_bytes) > max_file_size:
-            raise HTTPException(
-                status_code=413,
-                detail="File too large. Maximum size is 10 MB.",
-            )
-
-        try:
-            extracted_text = extract_text_from_pdf_bytes(
-                file_bytes,
-                filename,
-            )
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail=str(exc),
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=str(exc),
-            ) from exc
-
-        if not extracted_text.strip():
-            raise HTTPException(
-                status_code=422,
-                detail="No readable text was extracted from the file.",
-            )
-
-        result = parse_discharge_text(
-            extracted_text,
-            filename,
-        )
-
-        return result
-
-    finally:
-        await file.close()
-
+    return parse_discharge_text(sample_text, "Sample_Discharge_Summary_Gallbladder.pdf", is_demo=True)
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
