@@ -48,17 +48,85 @@ def test_robert_vance_miller_demographics():
     assert result.is_demo is False
 
 
+def test_diagnosis_and_procedure_separated_properly():
+    """Verifies combined header 'PRIMARY DIAGNOSIS & SURGICAL PROCEDURE:' correctly separates diagnosis from procedure."""
+    raw_text = """
+    ST. JUDE METROPOLITAN HOSPITAL
+    Patient Name: Test Patient
+    PRIMARY DIAGNOSIS & SURGICAL PROCEDURE:
+    Acute Calculous Cholecystitis
+    Laparoscopic Cholecystectomy
+    """
+
+    result = parse_discharge_text(raw_text, "Combined_Header_Test.pdf", is_demo=False)
+
+    assert result.patient_visit.discharge_diagnosis == "Acute Calculous Cholecystitis"
+    assert result.patient_visit.discharge_diagnosis != "& SURGICAL PROCEDURE"
+    assert result.patient_visit.procedure == "Laparoscopic Cholecystectomy"
+
+
+def test_medication_table_header_exclusion():
+    """Verifies table headers like 'Medication | Dosage | Route | Frequency | Duration' are excluded from parsed medications."""
+    raw_text = """
+    Patient Name: Test Patient
+    DISCHARGE MEDICATIONS:
+    Medication | Dosage | Route | Frequency | Duration
+    Amoxicillin | 875mg | PO | BID | 7 days
+    Tylenol | 500mg | PO | q6h PRN | 5 days
+    """
+
+    result = parse_discharge_text(raw_text, "Med_Table_Test.pdf", is_demo=False)
+
+    med_names = [m.name for m in result.medications]
+    assert "DISCHARGE" not in med_names
+    assert "Medication" not in med_names
+    assert "Dosage" not in med_names
+    assert any("Amoxicillin" in m for m in med_names)
+    assert any("Tylenol" in m for m in med_names)
+    assert len(result.medications) == 2
+
+
+def test_document_specific_recovery_instructions():
+    """Verifies document-specific recovery guidelines are extracted directly from source text."""
+    raw_text = """
+    Patient Name: Test Patient
+    DIET: Low-fat bland diet for 14 days. Drink at least 2L water daily.
+    ACTIVITY: No heavy lifting over 10 lbs for 2 weeks. Walk 10 minutes every 2 hours.
+    WOUND CARE: Keep incision glue clean and dry. Shower allowed after 48h.
+    WARNING SIGNS: Fever over 101F, severe unrelieved pain, or yellow eyes (jaundice).
+    """
+
+    result = parse_discharge_text(raw_text, "Recovery_Test.pdf", is_demo=False)
+
+    sections = {s.category: s for s in result.recovery_sections}
+    assert "diet" in sections
+    assert "Low-fat bland diet" in sections["diet"].medical_text
+    assert "activity" in sections
+    assert "No heavy lifting over 10 lbs" in sections["activity"].medical_text
+    assert "wound_care" in sections
+    assert "Shower allowed after 48h" in sections["wound_care"].medical_text
+    assert "warning_signs" in sections
+    assert "Fever over 101F" in sections["warning_signs"].medical_text
+
+
+def test_no_duplicate_or_invented_followup_appointments():
+    """Verifies follow-up appointments are deduplicated and no fake fallback appointment is generated when document specifies appointments."""
+    raw_text = """
+    Patient Name: Test Patient
+    FOLLOW UP APPOINTMENTS:
+    - Surgical Clinic: Oct 5, 2026 @ 9:00 AM with Dr. Jenkins
+    - Surgical Clinic: Oct 5, 2026 @ 9:00 AM with Dr. Jenkins
+    """
+
+    result = parse_discharge_text(raw_text, "Followup_Test.pdf", is_demo=False)
+
+    assert len(result.follow_up_appointments) == 1
+    assert "Surgical Clinic" in result.follow_up_appointments[0].doctor_or_dept
+    assert "Dr. Jenkins" in result.follow_up_appointments[0].instructions
+    assert "Oct 5, 2026" in result.follow_up_appointments[0].date_time
+
+
 def test_alternative_headings_and_next_line_values():
-    """
-    Tests parsing when values appear on the following line and under alternative headings:
-    - Patient Full Name
-    - Patient ID
-    - Consultant
-    - Admitted On
-    - Discharged On
-    - Principal Diagnosis with ICD-10
-    - Surgery Performed: None
-    """
     next_line_text = """
     ST. MARY CLINIC
 
@@ -96,7 +164,6 @@ def test_alternative_headings_and_next_line_values():
 
 
 def test_multiple_dates_handling():
-    """Verifies that admission, discharge, surgery, and follow-up dates are correctly isolated."""
     multi_date_text = """
     EXAMPLE HOSPITAL
     Patient: John Doe
@@ -118,7 +185,6 @@ def test_multiple_dates_handling():
 
 
 def test_procedure_explicitly_not_performed():
-    """Verifies procedure explicitly documented as not performed."""
     text = """
     Patient Name: Alice Smith
     MRN: 445566
@@ -188,7 +254,6 @@ def test_missing_patient_info_defaults_to_not_specified():
 
 
 def test_upload_endpoint_no_demo_data_substitution():
-    """Tests POST /api/upload-summary with an uploaded PDF file."""
     pdf_content = b"%PDF-1.4\n%Fake PDF content for testing\nMETROPOLITAN GENERAL HOSPITAL\nPatient Name: Upload Test Patient\nMRN: UP-9988\n"
     
     response = client.post(
